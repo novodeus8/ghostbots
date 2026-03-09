@@ -1,1 +1,96 @@
-(function(a,y,A){"use strict";const s=new Set(["276060004262477825","563434444321587202","356831787445387285","720351927581278219","204255221017214977","155149108183695360","282859044593598464","125367104336691200","330416853971107840"]),E=y.findByProps("dispatch","isDispatching");let i;var c={onLoad(){i=A.before("dispatch",E,function(t){const e=t[0];if(!e)return t;try{if((e.type==="MESSAGE_CREATE"||e.type==="MESSAGE_UPDATE")&&s.has(e.message?.author?.id)&&(t[0]={type:"NOOP"}),e.type==="TYPING_START"&&s.has(e.userId)&&(t[0]={type:"NOOP"}),(e.type==="LOAD_MESSAGES_SUCCESS"||e.type==="LOCAL_MESSAGES_LOADED")&&Array.isArray(e.messages)&&(e.messages=e.messages.filter(function(r){return!s.has(r.author?.id)})),e.type==="SEARCH_FINISH"&&Array.isArray(e.messages)&&(e.messages=e.messages.filter(function(r){return Array.isArray(r)?!r.some(function(n){return s.has(n.author?.id)}):!0})),e.type==="GUILD_MEMBER_LIST_UPDATE"&&Array.isArray(e.ops)){for(const r of e.ops)if(r.op==="SYNC"&&Array.isArray(r.items)){let n=null;r.items=r.items.filter(function(o){if(o.group)return n=o.group,!0;const u=o.member?.user?.id;return u&&s.has(u)?(n&&n.count>0&&n.count--,!1):!0})}}e.type==="PRESENCE_UPDATE"&&e.user?.id&&s.has(e.user.id)&&(t[0]={type:"NOOP"})}catch(r){console.error("GhostBots Error:",r)}return t})},onUnload(){i&&i()}};return a.default=c,Object.defineProperty(a,"__esModule",{value:!0}),a})({},vendetta.metro,vendetta.patcher);
+import { findByProps } from "@vendetta/metro";
+import { before } from "@vendetta/patcher";
+
+const BOTS_TO_HIDE = new Set([
+    "276060004262477825", // Invite Tracker
+    "563434444321587202", // Maki
+    "356831787445387285", // GiselleBot
+    "720351927581278219", // Koya
+    "204255221017214977", // Agent Smith
+    "155149108183695360", // Aether
+    "282859044593598464", // ProBot (Previously labeled Daisy)
+    "125367104336691200", // Flick
+    "330416853971107840", // Xana
+    // "330416853971107840" // <--- Add Welcomer's ID here!
+]);
+
+const FluxDispatcher = findByProps("dispatch", "isDispatching");
+let unpatch: () => void;
+
+export default {
+    onLoad() {
+        unpatch = before("dispatch", FluxDispatcher, (args) => {
+            const event = args[0];
+            if (!event) return args;
+            
+            try {
+                // 1. Drop specific singular events safely
+                if (event.type === "MESSAGE_CREATE" || event.type === "MESSAGE_UPDATE") {
+                    if (BOTS_TO_HIDE.has(event.message?.author?.id)) {
+                        args[0] = { type: "NOOP" };
+                        return args;
+                    }
+                }
+                if (event.type === "TYPING_START" && BOTS_TO_HIDE.has(event.userId)) {
+                    args[0] = { type: "NOOP" };
+                    return args;
+                }
+                if (event.type === "PRESENCE_UPDATE" && BOTS_TO_HIDE.has(event.user?.id)) {
+                    args[0] = { type: "NOOP" };
+                    return args;
+                }
+
+                // 2. Clone and filter any event containing a batch of messages (Chat, Search, etc.)
+                if (Array.isArray(event.messages)) {
+                    const filteredMessages = event.messages.map((group: any) => {
+                        // Mobile search results are usually arrays inside of arrays
+                        if (Array.isArray(group)) {
+                            return group.filter((msg: any) => !BOTS_TO_HIDE.has(msg?.author?.id));
+                        }
+                        return group;
+                    }).filter((group: any) => {
+                        // Drop the group entirely if it's empty or if it's a flat message from a bot
+                        if (Array.isArray(group)) return group.length > 0;
+                        return !BOTS_TO_HIDE.has(group?.author?.id);
+                    });
+
+                    // Assign a cloned object to bypass strict mode / frozen object errors
+                    args[0] = { ...event, messages: filteredMessages };
+                }
+
+                // 3. Clone and filter Member List safely
+                if (event.type === "GUILD_MEMBER_LIST_UPDATE" && Array.isArray(event.ops)) {
+                    const newOps = event.ops.map((op: any) => {
+                        if (op.op === "SYNC" && Array.isArray(op.items)) {
+                            let activeGroup: any = null;
+                            const newItems = op.items.filter((item: any) => {
+                                if (item.group) {
+                                    activeGroup = item.group;
+                                    return true;
+                                }
+                                const userId = item.member?.user?.id;
+                                if (userId && BOTS_TO_HIDE.has(userId)) {
+                                    if (activeGroup && activeGroup.count > 0) activeGroup.count--;
+                                    return false; 
+                                }
+                                return true;
+                            });
+                            return { ...op, items: newItems };
+                        }
+                        return op;
+                    });
+                    
+                    args[0] = { ...event, ops: newOps };
+                }
+
+            } catch (err) {
+                console.error("GhostBots Error:", err);
+            }
+            return args; 
+        });
+    },
+    
+    onUnload() {
+        if (unpatch) unpatch();
+    }
+};
